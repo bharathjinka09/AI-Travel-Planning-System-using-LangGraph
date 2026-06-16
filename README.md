@@ -12,7 +12,8 @@ The system uses 4 AI agents that work together to plan a complete trip automatic
 - 🏨 Hotel Search Agent
 - 🗓️ Itinerary Planning Agent
 - 🤖 Final Response Agent
-- 🧠 Memory using PostgreSQL
+- 🧠 Persistent Short-Term Memory (thread checkpoints) using PostgreSQL
+- 🧠 True Long-Term Memory (cross-thread user profile) using PostgreSQL Store
 - 🌐 Real-time API Integration
 - 💻 Streamlit Web Interface
 
@@ -52,7 +53,7 @@ Run the following command:
 
 		pip install langgraph langchain langchain-openai langchain-groq langchain-community langchain-tavily psycopg[binary] psycopg_pool python-dotenv tavily-python requests streamlit
 
-		pip install -U "psycopg[binary,pool]"  langgraph-checkpoint-postgres
+		pip install -U "psycopg[binary,pool]" langgraph-checkpoint-postgres langgraph-store-postgres
 
 ---
 
@@ -149,5 +150,15 @@ Plan a complete 7 days Japan trip including flights, hotels and sightseeing unde
 2. Hotel Agent searches hotels
 3. Itinerary Agent creates travel plan
 4. Final Agent combines everything together
-5. PostgreSQL stores conversation memory
+5. PostgreSQL checkpointer stores thread-level chat state (short-term memory)
+6. PostgreSQL store saves user profile/preferences by `user_id` across different `thread_id` sessions (long-term memory)
+
+---
+
+# Memory Clarification
+
+- **Short-Term Memory (Thread Level):** `PostgresSaver` with `thread_id`.
+- **Long-Term Memory (Cross Thread):** `PostgresStore` with `user_id`.
+
+If you open a new chat thread (`thread_id`) but keep the same `user_id`, the app can still recall saved preferences.
 
