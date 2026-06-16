@@ -305,15 +305,24 @@ with st.sidebar:
     st.markdown("<div class='sidebar-title'>🌍 AI Travel Planner</div>", unsafe_allow_html=True)
     st.markdown("---")
 
-    thread_id = st.text_input("👤 User ID", value="bharath_user",
-                              help="Your session ID — keeps travel history across queries")
+    user_id = st.text_input("👤 User ID", value="bharath",
+                            help="Long-term memory scope shared across different chat threads")
+    thread_id = st.text_input("💬 Thread ID", value="chat_1",
+                              help="Short-term thread/session id for this specific chat window")
 
     st.markdown("<div class='sidebar-title'>Powered by</div>", unsafe_allow_html=True)
     for tech in ["🔗 LangGraph", "🧠 Groq · LLaMA 3.3 70B", "🐘 PostgreSQL", "🔍 Tavily Search", "✈️ AviationStack"]:
         st.markdown(f"<div class='sidebar-chip'>{tech}</div>", unsafe_allow_html=True)
 
     st.markdown("<div class='sidebar-title'>Agent Pipeline</div>", unsafe_allow_html=True)
-    for step in ["① Flight Agent", "② Hotel Agent", "③ Itinerary Agent", "④ Final Agent"]:
+    for step in [
+        "① Memory Recall Agent",
+        "② Flight Agent",
+        "③ Hotel Agent",
+        "④ Itinerary Agent",
+        "⑤ Final Agent",
+        "⑥ Memory Save Agent",
+    ]:
         st.markdown(f"<div class='sidebar-chip'>{step}</div>", unsafe_allow_html=True)
 
 # ── Hero ──────────────────────────────────────────────────────────────────────
@@ -375,17 +384,19 @@ generate = st.button("🚀  Generate My Travel Plan", use_container_width=True)
 
 # ── Agent pipeline ────────────────────────────────────────────────────────────
 AGENT_META = {
+    "memory_recall_agent": ("🧠", "Memory Recall Agent"),
     "flight_agent":    ("✈️", "Flight Agent"),
     "hotel_agent":     ("🏨", "Hotel Agent"),
     "itinerary_agent": ("🗓️", "Itinerary Agent"),
     "final_agent":     ("🧠", "Final Agent"),
+    "memory_save_agent": ("💾", "Memory Save Agent"),
 }
 
 if generate:
     if not user_query.strip():
         st.warning("Please describe your trip first.")
     else:
-        config = {"configurable": {"thread_id": thread_id}}
+        config = {"configurable": {"thread_id": thread_id, "user_id": user_id}}
         collected = {"flight_results": "", "hotel_results": "",
                      "itinerary": "", "final_response": "", "llm_calls": 0}
 
@@ -400,6 +411,7 @@ if generate:
                 "flight_results": "",
                 "hotel_results": "",
                 "itinerary": "",
+                "memory_context": "",
                 "llm_calls": 0,
             },
             config=config,
@@ -435,7 +447,7 @@ if generate:
         # Metrics
         st.markdown(f"""
         <div class="metric-row">
-            <div class="metric-box"><div class="metric-val">4</div><div class="metric-lbl">Agents Run</div></div>
+            <div class="metric-box"><div class="metric-val">6</div><div class="metric-lbl">Agents Run</div></div>
             <div class="metric-box"><div class="metric-val">{collected['llm_calls']}</div><div class="metric-lbl">LLM Calls</div></div>
             <div class="metric-box"><div class="metric-val">✅</div><div class="metric-lbl">Status</div></div>
         </div>
@@ -457,7 +469,8 @@ if generate:
         file_content = f"""# Travel Plan
 **Query:** {user_query}
 **Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-**User ID:** {thread_id}
+    **User ID:** {user_id}
+    **Thread ID:** {thread_id}
 
 ---
 

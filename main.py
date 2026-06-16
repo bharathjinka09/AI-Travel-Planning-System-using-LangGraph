@@ -9,7 +9,8 @@ CREATE DATABASE langgraph_memory;  ( or open pgadmin4 and create database there 
 # main.py
 
 import os
-from typing import TypedDict, Annotated
+import re
+from typing import Any, TypedDict, Annotated
 import operator
 
 import psycopg
@@ -22,6 +23,14 @@ from langchain_core.messages import (
     AIMessage,
     SystemMessage,
 )
+from langchain_core.runnables import RunnableConfig
+
+try:
+    from langgraph.store.base import BaseStore
+    from langgraph.store.postgres import PostgresStore
+except Exception:
+    BaseStore = Any  # type: ignore[misc,assignment]
+    PostgresStore = None
 
 from langchain_groq import ChatGroq
 
@@ -46,7 +55,67 @@ class TravelState(TypedDict):
     flight_results: str
     hotel_results: str
     itinerary: str
+    memory_context: str
     llm_calls: int
+
+
+def _get_user_id(config: RunnableConfig) -> str:
+    configurable = config.get("configurable", {})
+    return str(configurable.get("user_id", "anonymous_user"))
+
+
+def _merge_profile(existing: dict[str, Any], query: str) -> dict[str, Any]:
+    updated = dict(existing)
+
+    name_match = re.search(r"\bmy name is\s+([A-Za-z][A-Za-z\s'-]{1,40})", query, flags=re.IGNORECASE)
+    if name_match:
+        updated["name"] = name_match.group(1).strip().title()
+
+    preference_patterns = [
+        r"\bi prefer\s+([^.,;]+)",
+        r"\bi like\s+([^.,;]+)",
+        r"\bmy budget is\s+([^.,;]+)",
+        r"\bi usually travel with\s+([^.,;]+)",
+    ]
+
+    preferences = list(updated.get("preferences", []))
+    for pattern in preference_patterns:
+        for match in re.findall(pattern, query, flags=re.IGNORECASE):
+            value = match.strip()
+            if value and value not in preferences:
+                preferences.append(value)
+
+    updated["preferences"] = preferences
+    updated["last_query"] = query
+    return updated
+
+
+def memory_recall_agent(state: TravelState, config: RunnableConfig, *, store: BaseStore):
+    user_id = _get_user_id(config)
+    item = store.get(("users",), user_id)
+
+    if item and isinstance(item.value, dict):
+        profile = item.value
+        name = profile.get("name", "")
+        preferences = profile.get("preferences", [])
+
+        profile_parts: list[str] = []
+        if name:
+            profile_parts.append(f"User name: {name}")
+        if preferences:
+            profile_parts.append("Known preferences: " + ", ".join(preferences))
+
+        memory_context = "\n".join(profile_parts)
+        message_text = "Loaded long-term memory for this user."
+    else:
+        memory_context = ""
+        message_text = "No long-term memory found for this user yet."
+
+    return {
+        "memory_context": memory_context,
+        "messages": [AIMessage(content=message_text)],
+        "llm_calls": state.get("llm_calls", 0),
+    }
 
 # Flight Agent
 def flight_agent(state: TravelState):
@@ -86,6 +155,9 @@ def itinerary_agent(state: TravelState):
 
     Hotel Results:
     {state['hotel_results']}
+
+    Long-Term User Memory:
+    {state.get('memory_context', '') or 'No stored user preferences yet.'}
     """
 
     response = llm.invoke([
@@ -127,18 +199,39 @@ def final_agent(state: TravelState):
     }
 
 
+def memory_save_agent(state: TravelState, config: RunnableConfig, *, store: BaseStore):
+    user_id = _get_user_id(config)
+    existing_item = store.get(("users",), user_id)
+    existing_profile: dict[str, Any] = {}
+
+    if existing_item and isinstance(existing_item.value, dict):
+        existing_profile = existing_item.value
+
+    updated_profile = _merge_profile(existing_profile, state["user_query"])
+    store.put(("users",), user_id, updated_profile)
+
+    return {
+        "messages": [AIMessage(content="Updated long-term memory for this user.")],
+        "llm_calls": state.get("llm_calls", 0),
+    }
+
+
 graph = StateGraph(TravelState)
 
+graph.add_node("memory_recall_agent", memory_recall_agent)
 graph.add_node("flight_agent", flight_agent)
 graph.add_node("hotel_agent", hotel_agent)
 graph.add_node("itinerary_agent", itinerary_agent)
 graph.add_node("final_agent", final_agent)
+graph.add_node("memory_save_agent", memory_save_agent)
 
-graph.add_edge(START, "flight_agent")
+graph.add_edge(START, "memory_recall_agent")
+graph.add_edge("memory_recall_agent", "flight_agent")
 graph.add_edge("flight_agent", "hotel_agent")
 graph.add_edge("hotel_agent", "itinerary_agent")
 graph.add_edge("itinerary_agent", "final_agent")
-graph.add_edge("final_agent", END)
+graph.add_edge("final_agent", "memory_save_agent")
+graph.add_edge("memory_save_agent", END)
 
 
 # Run one-time checkpoint migrations in autocommit mode because
@@ -160,13 +253,25 @@ _conn = psycopg.connect(
 )
 checkpointer = PostgresSaver(_conn)  # type: ignore[arg-type]
 
-app = graph.compile(checkpointer=checkpointer)
+if PostgresStore is None:
+    raise ImportError(
+        "PostgresStore is unavailable. Install/update LangGraph store support (for example, langgraph-store-postgres)."
+    )
+
+store = PostgresStore(_conn)  # type: ignore[arg-type]
+store.setup()
+
+app = graph.compile(checkpointer=checkpointer, store=store)
 
 
 if __name__ == "__main__":
+    user_id = input("Enter user id (long-term memory scope) [bharath]: ").strip() or "bharath"
+    thread_id = input("Enter thread id (chat window/session) [chat_1]: ").strip() or "chat_1"
+
     config = {
         "configurable": {
-            "thread_id": "user_bharath"
+            "thread_id": thread_id,
+            "user_id": user_id,
         }
     }
 
@@ -181,6 +286,7 @@ if __name__ == "__main__":
             "flight_results": "",
             "hotel_results": "",
             "itinerary": "",
+            "memory_context": "",
             "llm_calls": 0
         },
         config=config
