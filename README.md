@@ -1,6 +1,6 @@
 # AI Travel Planning System using LangGraph
 
-Used account is bharathjinka65@gmail.com for Neon db and other API accounts.
+Used Google account is bharathjinka65@gmail.com for Neon db and other API accounts.
 
 This project is a Real-World Multi-Agent AI System built using LangGraph.
 
