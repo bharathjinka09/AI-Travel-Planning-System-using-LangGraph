@@ -13,6 +13,7 @@ from typing import TypedDict, Annotated
 import operator
 
 import psycopg
+from psycopg.rows import dict_row
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.postgres import PostgresSaver
 from langchain_core.messages import (
@@ -142,11 +143,21 @@ graph.add_edge("final_agent", END)
 
 # Run one-time checkpoint migrations in autocommit mode because
 # LangGraph uses CREATE INDEX CONCURRENTLY in its Postgres setup.
-with psycopg.connect(DATABASE_URL, autocommit=True) as _setup_conn:
+with psycopg.connect(
+    DATABASE_URL,
+    autocommit=True,
+    prepare_threshold=0,
+    row_factory=dict_row,
+) as _setup_conn:
     PostgresSaver(_setup_conn).setup()  # type: ignore[arg-type]
 
 # Persistent runtime connection so both CLI and Streamlit can share the compiled app
-_conn = psycopg.connect(DATABASE_URL)
+_conn = psycopg.connect(
+    DATABASE_URL,
+    autocommit=True,
+    prepare_threshold=0,
+    row_factory=dict_row,
+)
 checkpointer = PostgresSaver(_conn)  # type: ignore[arg-type]
 
 app = graph.compile(checkpointer=checkpointer)
