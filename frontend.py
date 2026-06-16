@@ -220,8 +220,8 @@ section[data-testid="stSidebar"] {
 }
 .sidebar-title { color: #e0edf8; font-size: 1rem; font-weight: 600; margin: 1rem 0 0.5rem; }
 
-/* Hide branding */
-#MainMenu, footer, header { visibility: hidden; }
+/* Hide branding but keep header visible for sidebar toggle */
+#MainMenu, footer { visibility: hidden; }
 
 /* Textarea */
 .stTextArea textarea {
@@ -305,15 +305,24 @@ with st.sidebar:
     st.markdown("<div class='sidebar-title'>🌍 AI Travel Planner</div>", unsafe_allow_html=True)
     st.markdown("---")
 
-    thread_id = st.text_input("👤 User ID", value="bharath_user",
-                              help="Your session ID — keeps travel history across queries")
+    user_id = st.text_input("👤 User ID", value="bharath",
+                            help="Long-term memory scope shared across different chat threads")
+    thread_id = st.text_input("💬 Thread ID", value="chat_1",
+                              help="Short-term thread/session id for this specific chat window")
 
     st.markdown("<div class='sidebar-title'>Powered by</div>", unsafe_allow_html=True)
     for tech in ["🔗 LangGraph", "🧠 Groq · LLaMA 3.3 70B", "🐘 PostgreSQL", "🔍 Tavily Search", "✈️ AviationStack"]:
         st.markdown(f"<div class='sidebar-chip'>{tech}</div>", unsafe_allow_html=True)
 
     st.markdown("<div class='sidebar-title'>Agent Pipeline</div>", unsafe_allow_html=True)
-    for step in ["① Flight Agent", "② Hotel Agent", "③ Itinerary Agent", "④ Final Agent"]:
+    for step in [
+        "① Memory Recall Agent",
+        "② Flight Agent",
+        "③ Hotel Agent",
+        "④ Itinerary Agent",
+        "⑤ Final Agent",
+        "⑥ Memory Save Agent",
+    ]:
         st.markdown(f"<div class='sidebar-chip'>{step}</div>", unsafe_allow_html=True)
 
 # ── Hero ──────────────────────────────────────────────────────────────────────
@@ -364,7 +373,7 @@ for qc, label in zip(qcols, QUICK):
             quick_fill = label
 
 user_query = st.text_area(
-    "",
+    "Trip request",
     value=quick_fill,
     placeholder="e.g. Plan a complete 7-day Japan trip including flights, hotels and sightseeing under ₹2 lakhs",
     height=100,
@@ -375,17 +384,19 @@ generate = st.button("🚀  Generate My Travel Plan", use_container_width=True)
 
 # ── Agent pipeline ────────────────────────────────────────────────────────────
 AGENT_META = {
+    "memory_recall_agent": ("🧠", "Memory Recall Agent"),
     "flight_agent":    ("✈️", "Flight Agent"),
     "hotel_agent":     ("🏨", "Hotel Agent"),
     "itinerary_agent": ("🗓️", "Itinerary Agent"),
     "final_agent":     ("🧠", "Final Agent"),
+    "memory_save_agent": ("💾", "Memory Save Agent"),
 }
 
 if generate:
     if not user_query.strip():
         st.warning("Please describe your trip first.")
     else:
-        config = {"configurable": {"thread_id": thread_id}}
+        config = {"configurable": {"thread_id": thread_id, "user_id": user_id}}
         collected = {"flight_results": "", "hotel_results": "",
                      "itinerary": "", "final_response": "", "llm_calls": 0}
 
@@ -400,6 +411,8 @@ if generate:
                 "flight_results": "",
                 "hotel_results": "",
                 "itinerary": "",
+                "memory_context": "",
+                "memory_profile": {},
                 "llm_calls": 0,
             },
             config=config,
@@ -409,7 +422,16 @@ if generate:
                 icon, label = AGENT_META.get(node_name, ("🔧", node_name))
 
                 with st.status(f"{icon}  {label}", state="complete", expanded=True):
-                    if node_name == "flight_agent":
+                    if node_name == "memory_recall_agent":
+                        msgs = state_update.get("messages", [])
+                        text = msgs[-1].content if msgs else "No memory recall message."
+                        st.markdown(text)
+
+                        memory_ctx = state_update.get("memory_context", "")
+                        if memory_ctx:
+                            st.markdown(f"**Memory Context:**\n\n{memory_ctx}")
+
+                    elif node_name == "flight_agent":
                         text = state_update.get("flight_results", "")
                         collected["flight_results"] = text
                         st.markdown(text or "_No flight data returned._")
@@ -430,12 +452,31 @@ if generate:
                         collected["final_response"] = text
                         st.markdown(text or "_No final response._")
 
+                    elif node_name == "memory_save_agent":
+                        msgs = state_update.get("messages", [])
+                        text = msgs[-1].content if msgs else "No memory save message."
+                        st.markdown(text)
+
+                        profile = state_update.get("memory_profile", {})
+                        if isinstance(profile, dict) and profile:
+                            name = profile.get("name", "Not set")
+                            preferences = profile.get("preferences", [])
+                            last_query = profile.get("last_query", "")
+
+                            pref_text = ", ".join(preferences) if preferences else "None yet"
+                            st.markdown(
+                                "**Saved Profile**\n\n"
+                                f"- Name: {name}\n"
+                                f"- Preferences: {pref_text}\n"
+                                f"- Last Query: {last_query}"
+                            )
+
                     collected["llm_calls"] = state_update.get("llm_calls", collected["llm_calls"])
 
         # Metrics
         st.markdown(f"""
         <div class="metric-row">
-            <div class="metric-box"><div class="metric-val">4</div><div class="metric-lbl">Agents Run</div></div>
+            <div class="metric-box"><div class="metric-val">6</div><div class="metric-lbl">Agents Run</div></div>
             <div class="metric-box"><div class="metric-val">{collected['llm_calls']}</div><div class="metric-lbl">LLM Calls</div></div>
             <div class="metric-box"><div class="metric-val">✅</div><div class="metric-lbl">Status</div></div>
         </div>
@@ -457,7 +498,8 @@ if generate:
         file_content = f"""# Travel Plan
 **Query:** {user_query}
 **Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-**User ID:** {thread_id}
+    **User ID:** {user_id}
+    **Thread ID:** {thread_id}
 
 ---
 
