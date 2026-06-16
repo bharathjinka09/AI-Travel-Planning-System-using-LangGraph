@@ -40,7 +40,7 @@ Now activate the environment:
 
 #### Windows
 
-		venv\Scripts\activate
+		.\venv\Scripts\activate
 
 ---
 
