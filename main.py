@@ -30,6 +30,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL is not set. Add it to your environment or .env file.")
 
 # LLM
 llm = ChatGroq(
@@ -138,10 +140,14 @@ graph.add_edge("itinerary_agent", "final_agent")
 graph.add_edge("final_agent", END)
 
 
-# Persistent connection so both CLI and Streamlit can share the compiled app
+# Run one-time checkpoint migrations in autocommit mode because
+# LangGraph uses CREATE INDEX CONCURRENTLY in its Postgres setup.
+with psycopg.connect(DATABASE_URL, autocommit=True) as _setup_conn:
+    PostgresSaver(_setup_conn).setup()  # type: ignore[arg-type]
+
+# Persistent runtime connection so both CLI and Streamlit can share the compiled app
 _conn = psycopg.connect(DATABASE_URL)
-checkpointer = PostgresSaver(_conn)
-checkpointer.setup()
+checkpointer = PostgresSaver(_conn)  # type: ignore[arg-type]
 
 app = graph.compile(checkpointer=checkpointer)
 
