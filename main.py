@@ -56,6 +56,7 @@ class TravelState(TypedDict):
     hotel_results: str
     itinerary: str
     memory_context: str
+    memory_profile: dict[str, Any]
     llm_calls: int
 
 
@@ -212,6 +213,7 @@ def memory_save_agent(state: TravelState, config: RunnableConfig, *, store: Base
 
     return {
         "messages": [AIMessage(content="Updated long-term memory for this user.")],
+        "memory_profile": updated_profile,
         "llm_calls": state.get("llm_calls", 0),
     }
 
@@ -244,21 +246,29 @@ with psycopg.connect(
 ) as _setup_conn:
     PostgresSaver(_setup_conn).setup()  # type: ignore[arg-type]
 
-# Persistent runtime connection so both CLI and Streamlit can share the compiled app
-_conn = psycopg.connect(
+# Use dedicated runtime connections to avoid pipeline interference between
+# PostgresSaver (thread checkpoints) and PostgresStore (long-term memory).
+_checkpoint_conn = psycopg.connect(
     DATABASE_URL,
     autocommit=True,
     prepare_threshold=0,
     row_factory=dict_row,
 )
-checkpointer = PostgresSaver(_conn)  # type: ignore[arg-type]
+checkpointer = PostgresSaver(_checkpoint_conn)  # type: ignore[arg-type]
 
 if PostgresStore is None:
     raise ImportError(
         "PostgresStore is unavailable. Install/update LangGraph store support (for example, langgraph-store-postgres)."
     )
 
-store = PostgresStore(_conn)  # type: ignore[arg-type]
+_store_conn = psycopg.connect(
+    DATABASE_URL,
+    autocommit=True,
+    prepare_threshold=0,
+    row_factory=dict_row,
+)
+
+store = PostgresStore(_store_conn)  # type: ignore[arg-type]
 store.setup()
 
 app = graph.compile(checkpointer=checkpointer, store=store)
@@ -287,6 +297,7 @@ if __name__ == "__main__":
             "hotel_results": "",
             "itinerary": "",
             "memory_context": "",
+            "memory_profile": {},
             "llm_calls": 0
         },
         config=config

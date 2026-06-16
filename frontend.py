@@ -373,7 +373,7 @@ for qc, label in zip(qcols, QUICK):
             quick_fill = label
 
 user_query = st.text_area(
-    "",
+    "Trip request",
     value=quick_fill,
     placeholder="e.g. Plan a complete 7-day Japan trip including flights, hotels and sightseeing under ₹2 lakhs",
     height=100,
@@ -412,6 +412,7 @@ if generate:
                 "hotel_results": "",
                 "itinerary": "",
                 "memory_context": "",
+                "memory_profile": {},
                 "llm_calls": 0,
             },
             config=config,
@@ -421,7 +422,16 @@ if generate:
                 icon, label = AGENT_META.get(node_name, ("🔧", node_name))
 
                 with st.status(f"{icon}  {label}", state="complete", expanded=True):
-                    if node_name == "flight_agent":
+                    if node_name == "memory_recall_agent":
+                        msgs = state_update.get("messages", [])
+                        text = msgs[-1].content if msgs else "No memory recall message."
+                        st.markdown(text)
+
+                        memory_ctx = state_update.get("memory_context", "")
+                        if memory_ctx:
+                            st.markdown(f"**Memory Context:**\n\n{memory_ctx}")
+
+                    elif node_name == "flight_agent":
                         text = state_update.get("flight_results", "")
                         collected["flight_results"] = text
                         st.markdown(text or "_No flight data returned._")
@@ -441,6 +451,25 @@ if generate:
                         text = msgs[-1].content if msgs else ""
                         collected["final_response"] = text
                         st.markdown(text or "_No final response._")
+
+                    elif node_name == "memory_save_agent":
+                        msgs = state_update.get("messages", [])
+                        text = msgs[-1].content if msgs else "No memory save message."
+                        st.markdown(text)
+
+                        profile = state_update.get("memory_profile", {})
+                        if isinstance(profile, dict) and profile:
+                            name = profile.get("name", "Not set")
+                            preferences = profile.get("preferences", [])
+                            last_query = profile.get("last_query", "")
+
+                            pref_text = ", ".join(preferences) if preferences else "None yet"
+                            st.markdown(
+                                "**Saved Profile**\n\n"
+                                f"- Name: {name}\n"
+                                f"- Preferences: {pref_text}\n"
+                                f"- Last Query: {last_query}"
+                            )
 
                     collected["llm_calls"] = state_update.get("llm_calls", collected["llm_calls"])
 
